@@ -1,7 +1,7 @@
 /* 고! 서비스 워커 — build.py --pages 가 만든다. 배포마다 VERSION(index.html 해시)이 바뀌어 옛 캐시를 지운다.
    index.html(탐색 요청): 네트워크 우선 → 실패하면 캐시 (오프라인 플레이). 새 배포는 다음 실행 때 바로 보인다.
    아이콘·매니페스트: 캐시 우선 + 뒤에서 갱신(stale-while-revalidate). */
-const VERSION = 'f6e4821af1';
+const VERSION = 'd0a5dab312';
 const CACHE = 'go-' + VERSION;
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png"];
 self.addEventListener('install', e => {
