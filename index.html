@@ -2950,8 +2950,8 @@ html.lay-phone .laysel small{font-size:10.5px}html.lay-phone .laysel .mini-btn{m
 <script>/* 「고!」 BGM — procedural WebAudio music, no audio files.
  * 거문고 (low, thick, buzzy Karplus-Strong + 술대 stick thwack) ostinato, 가야금 (bright KS with 농현 vibrato /
  * 추성 slide / 퇴성 fall) melody hook, 장구 (덩·쿵·덕·기덕) in a 12/8 자진모리-style groove, 생황-ish drone pad,
- * 꽹과리 for the 고 layer. Pentatonic D F G A C, dotted-quarter = 100 BPM, 16-bar form (A A B A) ≈ 38.4 s loop.
- * v0.4.2: 쉬운 멜로디 — 판·상점은 F 중심의 밝은 노래, 보스는 D 중심의 짧은 반복 동기. 박마다 한 음, 순차 진행, 매 루프 동일.
+ * 꽹과리 for the 고 layer. C major, dotted-quarter = 100 BPM, 16-bar form (A A B A) ≈ 38.4 s loop.
+ * v0.4.2b: C 장조 · 판 I–V–vi–IV(후렴 vi–IV–I–V) · 보스 I–bVII–IV–I · 멜로디 C5~C6, 매 루프 동일.
  * Intensity layers follow the game: calm (상점·인트로) / play / boss / +고 layers. Same scheduler renders
  * the preview through OfflineAudioContext (GoBGM.renderWav). Presentation only — never touches game state. */
 (function () {
@@ -2965,38 +2965,36 @@ html.lay-phone .laysel small{font-size:10.5px}html.lay-phone .laysel .mini-btn{m
 
   // ---------------- music data ----------------
   const BPM = 100, STEPS = 12, BEAT = 60 / BPM, STEP = BEAT / 3, BAR = BEAT * 4; // 12/8: 4 dotted-quarter beats × 3
-  const SCALE = [0, 3, 5, 7, 10]; // D minor pentatonic (계면조 colour: D F G A C)
-  const ROOT = 62; // D4
-  const deg = d => { const o = Math.floor(d / 5), i = ((d % 5) + 5) % 5; return ROOT + 12 * o + SCALE[i]; };
-  // v0.4.2 「쉬운 멜로디」: 따라 부를 수 있게 단순하게 — 한 마디 = 점4분 4박(12스텝), 거의 박마다 한 음, 순차 진행 위주,
-  // 4마디 악구를 되풀이하는 A A B A 형식. 음계는 그대로 D F G A C (F를 중심으로 들으면 밝은 평조풍, D 중심이면 계면조풍).
-  // degree: -1=C4 0=D4 1=F4 2=G4 3=A4 4=C5 5=D5 6=F5 7=G5
-  // melody bars: [step, degree, lenSteps, ornament] ornaments: v=농현 vibrato, s=추성(slide up), f=퇴성(fall)
+  // v0.4.2b 「밝은 메이저」: C 장조, 멜로디는 C5~C6(일부 D6) 높은 음역 — 아이폰 스피커에서도 또렷하게.
+  // 한 마디 = 점4분 4박(12스텝), 마디마다 코드 하나. 판: I–V–vi–IV (C–G–Am–F) 두 번 → 후렴 vi–IV–I–V (Am–F–C–G) → 다시 I–V–vi–IV.
+  // 멜로디는 코드 구성음을 크게 짚는 순차 진행 + 기억에 남는 도약 한 번(솔→도, 라→높은 도). 매 루프 동일(랜덤 없음).
+  const N = { C5: 72, D5: 74, E5: 76, F5: 77, G5: 79, A5: 81, Bb5: 82, B5: 83, C6: 84, D6: 86 };
+  // melody bars: [step, midi, lenSteps, ornament] ornaments: v=농현 vibrato, s=추성(slide up), f=퇴성(fall)
   const MEL = {
-    // 판(play)·상점(calm): 「솔 라 도 도 | 라 도 라 솔 ~ | 솔 라 도 레 | 도 라 솔 ~」 느낌의 밝은 노래
-    P1: [[0, 1, 3], [3, 2, 3], [6, 3, 3], [9, 3, 3]],                 // F G A A
-    P2: [[0, 2, 2], [2, 3, 1], [3, 2, 3], [6, 1, 6, 'v']],            // G-A G F~
-    P3: [[0, 1, 3], [3, 2, 3], [6, 3, 3], [9, 4, 3, 's']],            // F G A C
-    P4: [[0, 3, 2], [2, 2, 1], [3, 1, 3], [6, 0, 6, 'v']],            // A-G F D~  (반마침)
-    P4e: [[0, 3, 2], [2, 2, 1], [3, 2, 3], [6, 1, 6, 'v']],           // A-G G F~  (온마침)
-    Q1: [[0, 4, 3], [3, 5, 3], [6, 4, 3], [9, 3, 3]],                 // C D C A   (후렴: 한 음 높게)
-    Q2: [[0, 3, 3], [3, 4, 3], [6, 3, 6, 'v']],                       // A C A~
-    Q3: [[0, 4, 3], [3, 5, 3], [6, 4, 3], [9, 3, 3]],                 // C D C A
-    Q4: [[0, 2, 2], [2, 3, 1], [3, 2, 3], [6, 1, 6, 'f']],            // G-A G F~
-    // 보스판: 계면조(D 중심)로 같은 리듬을 되풀이하는 짧고 단단한 동기
-    X1: [[0, 5, 2], [2, 5, 1], [3, 4, 3], [6, 3, 3], [9, 2, 3]],      // D-D C A G
-    X2: [[0, 3, 2], [2, 3, 1], [3, 2, 3], [6, 1, 3], [9, 0, 3]],      // A-A G F D
-    X3: [[0, 5, 2], [2, 5, 1], [3, 4, 3], [6, 3, 3], [9, 4, 3]],      // D-D C A C
-    X4: [[0, 3, 3], [3, 2, 3], [6, 0, 6, 'v']],                       // A G D~
-    Y1: [[0, 6, 2], [2, 6, 1], [3, 5, 3], [6, 4, 3], [9, 3, 3]],      // F-F D C A  (한 음 높여 긴장)
-    Y2: [[0, 4, 2], [2, 4, 1], [3, 3, 3], [6, 2, 3], [9, 3, 3]],      // C-C A G A
+    // 판(play)·상점(calm)
+    A1: [[0, N.E5, 3], [3, N.G5, 3], [6, N.G5, 2], [8, N.A5, 1], [9, N.G5, 3]],          // C : 미 솔 솔-라 솔
+    A2: [[0, N.D5, 3], [3, N.G5, 3], [6, N.F5, 2], [8, N.E5, 1], [9, N.D5, 3]],          // G : 레 솔 파-미 레
+    A3: [[0, N.C5, 3], [3, N.E5, 3], [6, N.A5, 3, 's'], [9, N.G5, 3]],                   // Am: 도 미 라 솔
+    A4: [[0, N.F5, 2], [2, N.E5, 1], [3, N.F5, 3], [6, N.A5, 6, 'v']],                   // F : 파-미 파 라~
+    A4e: [[0, N.F5, 2], [2, N.E5, 1], [3, N.D5, 3], [6, N.C5, 6, 'v']],                  // F : 파-미 레 도~ (마침)
+    B1: [[0, N.A5, 3], [3, N.A5, 3], [6, N.G5, 2], [8, N.E5, 1], [9, N.G5, 3]],          // Am: 라 라 솔-미 솔
+    B2: [[0, N.F5, 3], [3, N.A5, 3], [6, N.C6, 6, 'v']],                                 // F : 파 라 높은도~
+    B3: [[0, N.C6, 2], [2, N.B5, 1], [3, N.A5, 3], [6, N.G5, 3], [9, N.E5, 3]],          // C : 도-시 라 솔 미
+    B4: [[0, N.G5, 3], [3, N.F5, 3], [6, N.E5, 3], [9, N.D5, 3]],                        // G : 솔 파 미 레 → 다시 미(A1)
+    // 보스판: I–bVII–IV–I (C–B♭–F–C), 같은 리듬 동기를 몰아치듯 반복 — 긴장감 있지만 장조
+    X1: [[0, N.G5, 2], [2, N.G5, 1], [3, N.C6, 3], [6, N.G5, 2], [8, N.E5, 1], [9, N.G5, 3]],     // C
+    X2: [[0, N.F5, 2], [2, N.F5, 1], [3, N.Bb5, 3], [6, N.F5, 2], [8, N.D5, 1], [9, N.F5, 3]],    // B♭
+    X3: [[0, N.A5, 2], [2, N.A5, 1], [3, N.C6, 3], [6, N.A5, 2], [8, N.F5, 1], [9, N.A5, 3]],     // F
+    X4: [[0, N.G5, 2], [2, N.E5, 1], [3, N.G5, 3], [6, N.C6, 6, 'v']],                           // C
+    Y2: [[0, N.B5, 2], [2, N.B5, 1], [3, N.D6, 3], [6, N.B5, 2], [8, N.G5, 1], [9, N.B5, 3]],     // G
   };
-  const FORM_PLAY = ['P1', 'P2', 'P3', 'P4', 'P1', 'P2', 'P3', 'P4e', 'Q1', 'Q2', 'Q3', 'Q4', 'P1', 'P2', 'P3', 'P4e'];
-  const FORM_BOSS = ['X1', 'X2', 'X3', 'X4', 'X1', 'X2', 'X3', 'X4', 'Y1', 'Y2', 'Y1', 'X4', 'X1', 'X2', 'X3', 'X4'];
+  const FORM_PLAY = ['A1', 'A2', 'A3', 'A4', 'A1', 'A2', 'A3', 'A4e', 'B1', 'B2', 'B3', 'B4', 'A1', 'A2', 'A3', 'A4e'];
+  const FORM_BOSS = ['X1', 'X2', 'X3', 'X4', 'X1', 'X2', 'X3', 'X4', 'X3', 'Y2', 'X1', 'X4', 'X1', 'X2', 'X3', 'X4'];
   const FORM = FORM_PLAY; // loop length (16 bars) — 두 형식 모두 같은 길이
-  // 거문고 bass roots per bar (midi). 판: F C D F (밝게) / 후렴 C F G C. 보스: D C D D (어둡게) / F C.
-  const BASS_PLAY = [41, 36, 38, 41, 41, 36, 38, 41, 36, 41, 43, 36, 41, 36, 38, 41];
-  const BASS_BOSS = [38, 36, 38, 38, 38, 36, 38, 38, 41, 36, 41, 38, 38, 36, 38, 38];
+  // 거문고 bass roots per bar (midi, F2~C3: 낮지만 탁하지 않게). 판: C G A F ×2 | A F C G | C G A F. 보스: C B♭ F C ×2 | F G C C | C B♭ F C.
+  const BASS_PLAY = [48, 43, 45, 41, 48, 43, 45, 41, 45, 41, 48, 43, 48, 43, 45, 41];
+  const BASS_BOSS = [48, 46, 41, 48, 48, 46, 41, 48, 41, 43, 48, 48, 48, 46, 41, 48];
+  const triad = root => [root, root + (root % 12 === 9 ? 3 : 4), root + 7]; // A = 단3화음(vi), 나머지 장3화음
   // 장구 patterns over 12 steps: 덩 쿵 덕 기(기덕 grace) ·
   const JANG = {
     calm: ['쿵', '', '', '', '', '', '쿵', '', '덕', '', '', ''],
@@ -3098,11 +3096,19 @@ html.lay-phone .laysel small{font-size:10.5px}html.lay-phone .laysel .mini-btn{m
     const c = R.ctx; const d = open ? 0.28 : 0.06;
     [1210, 1745, 2390, 3150, 4020].forEach((f, i) => { const o = c.createOscillator(); o.type = i % 2 ? 'square' : 'sine'; o.frequency.value = f; o.connect(env(R, t, (0.07 / (1 + i * 0.4)) * vel, 0.001, d * (1 - i * 0.1), bus)); o.start(t); o.stop(t + d + 0.05); });
   }
-  function drone(R, t, midi, dur, bus) {
-    const c = R.ctx; const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.09, t + dur * 0.3); g.gain.linearRampToValueAtTime(0.0001, t + dur + 0.3);
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(700, t); lp.frequency.linearRampToValueAtTime(1300, t + dur * 0.5); lp.frequency.linearRampToValueAtTime(700, t + dur);
+  function drone(R, t, midi, dur, bus) { // 코드 패드: 근음·3도·5도 + 옥타브 근음 (triangle, 부드럽게)
+    const c = R.ctx; const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.055, t + Math.min(0.4, dur * 0.25)); g.gain.setValueAtTime(0.055, t + dur * 0.8); g.gain.linearRampToValueAtTime(0.0001, t + dur + 0.25);
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500;
     lp.connect(g); g.connect(bus);
-    [[midi, -6], [midi, 5], [midi + 7, 0], [midi + 12, 3]].forEach(([m, det]) => { const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(m); o.detune.value = det; o.connect(lp); o.start(t); o.stop(t + dur + 0.4); });
+    const [r0, r3, r5] = triad(midi);
+    [[r0, -5], [r3, 4], [r5, 0], [r0 + 12, 3]].forEach(([m, det]) => { const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(m); o.detune.value = det; o.connect(lp); o.start(t); o.stop(t + dur + 0.35); });
+  }
+  function lead(R, t, midi, vel, dur, bus) { // 밝은 지속음 리드: 삼각파 + 약한 비브라토, 짧은 어택
+    const c = R.ctx; const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(midi);
+    const lfo = c.createOscillator(); lfo.frequency.value = 5.2; const lg = c.createGain(); lg.gain.value = 0; lg.gain.setValueAtTime(0, t + 0.18); lg.gain.linearRampToValueAtTime(6, t + Math.max(0.2, dur)); lfo.connect(lg); lg.connect(o.detune);
+    const g = c.createGain(); const pk = 0.13 * vel; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(pk, t + 0.015); g.gain.exponentialRampToValueAtTime(pk * 0.55, t + 0.25); g.gain.setTargetAtTime(0.0001, t + dur, 0.09);
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 4200;
+    o.connect(lp); lp.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.5); lfo.start(t); lfo.stop(t + dur + 0.5);
   }
 
   // ---------------- graph ----------------
@@ -3133,16 +3139,17 @@ html.lay-phone .laysel small{font-size:10.5px}html.lay-phone .laysel .mini-btn{m
     const calm = mode === 'calm';
     const boss = mode === 'boss'; const BASS = boss ? BASS_BOSS : BASS_PLAY;
     // drone: every 2 bars
-    if (st === 0 && fb % 2 === 0 && on(R, 'drone')) drone(R, t, BASS[fb] + 12, BAR * 2, R.bus.drone);
+    if (st === 0 && on(R, 'drone')) drone(R, t, BASS[fb] + 12, BAR, R.bus.drone); // 마디마다 그 코드의 3화음 패드
     // melody — 매번 똑같이(랜덤 꾸밈음 없음) 되풀이해서 귀에 붙게. 상점(calm)은 짧은 경과음만 빼고 같은 음높이로 부드럽게.
     if (on(R, 'mel')) {
       const notes = MEL[(boss ? FORM_BOSS : FORM_PLAY)[fb]];
       for (const n of notes) if (n[0] === st) {
-        const [, d, len, orn] = n;
+        const [, m, len, orn] = n;
         if (calm && len < 2) continue;
-        const m = deg(d);
-        gayageum(R, t, m, calm ? 0.8 : 0.95, (calm && len === 2 ? 3 : len) * STEP, orn, R.bus.mel);
-        if (on(R, 'oct')) gayageum(R, t + 0.012, m + 12, 0.5, len * STEP, orn, R.bus.oct);
+        const dur = (calm && len === 2 ? 3 : len) * STEP;
+        gayageum(R, t, m, calm ? 0.68 : 0.92, dur, orn, R.bus.mel);
+        lead(R, t, m, calm ? 0.55 : 1, dur, R.bus.mel); // 지속음 리드(삼각파) — 높은 음역에서 또렷하게
+        if (on(R, 'oct')) gayageum(R, t + 0.012, m - 12, 0.55, len * STEP, orn, R.bus.oct); // 2고: 한 옥타브 아래로 두껍게 (멜로디가 이미 높음)
       }
     }
     // 거문고 ostinato (bass)
