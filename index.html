@@ -684,7 +684,7 @@ body:not(.fx) .pk-rip{display:none}
 @media (max-height:760px){.modal.end{padding:12px 18px}.modal.end h2{font-size:26px;margin-bottom:4px}.bd .ln{padding:3px 10px;margin:3px 0}.bd .res{font-size:34px;margin-top:4px}.money-lines div{padding:2px 0}}
 .modal.over .endless-note{max-width:520px;margin:6px auto 0;font-size:13px;line-height:1.45;white-space:normal;word-break:keep-all;text-wrap:balance}
 .laysel{display:inline-flex;align-items:center;gap:4px}.laysel small{font-size:12px;color:#7a6650;margin-right:2px;white-space:nowrap}.laysel .mini-btn.on{background:#ffd45c;color:var(--ink)}
-.praise.praise-live{z-index:60;pointer-events:auto;cursor:pointer;-webkit-tap-highlight-color:transparent}.praise.praise-live .praise-flash{z-index:-1}.praise.praise-out{pointer-events:auto}
+.praise.praise-live{z-index:60;pointer-events:none;-webkit-tap-highlight-color:transparent}.praise.praise-live .praise-flash{z-index:-1}.praise.praise-out{pointer-events:none}
 .fx-flashw{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:3;mix-blend-mode:normal}
 /* ===================== v0.5 UI 정리 (proposal_v1): 큰 패 · 숫자 위계 · 상시 글자 줄이기 ===================== */
 .main{grid-template-columns:240px minmax(0,1fr) 190px}
@@ -3830,17 +3830,24 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   // ================= audio (WebAudio synth, starts after first interaction) =================
-  let ac = null, master = null, noiseBuf = null, lastHover = 0;
+  let ac = null, master = null, noiseBuf = null, lastHover = 0, sessionSet = false;
+  // iOS 17+: 오디오 세션을 '재생'으로. WebAudio만 쓰는 페이지는 기본('auto')이 ambient라 무음 스위치(옆면 벨소리 끔)에서 효과음·BGM이 전부 안 났다.
+  function audioSession() { if (sessionSet) return; sessionSet = true; try { const s = navigator.audioSession; if (s && 'type' in s && s.type !== 'playback') s.type = 'playback'; } catch (e) {} }
+  // 재개: iOS는 전화·시리·백그라운드 뒤에 state가 'interrupted'(비표준)로 남는다 → 'suspended'만 보면 효과음이 영영 안 돌아옴
+  const resume = c => { if (c && c.state !== 'running' && c.state !== 'closed') { try { const p = c.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) {} } };
   function unlock() {
-    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    audioSession();
+    if (ac) { resume(ac); return; }
     const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
     try {
-      ac = new C(); try { const sb = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource(); src.buffer = sb; src.connect(ac.destination); src.start(0); } catch (e) {} if (ac.state === 'suspended') ac.resume(); master = ac.createGain(); const comp = ac.createDynamicsCompressor(); master.connect(comp); comp.connect(ac.destination); applyVol();
+      ac = new C(); try { const sb = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource(); src.buffer = sb; src.connect(ac.destination); src.start(0); } catch (e) {} resume(ac); master = ac.createGain(); const comp = ac.createDynamicsCompressor(); master.connect(comp); comp.connect(ac.destination); applyVol();
       noiseBuf = ac.createBuffer(1, ac.sampleRate * 0.5, ac.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     } catch (e) { ac = null; }
   }
   // iOS(WebKit)는 touchend·click·pointerup에서만 오디오를 허용(touchstart/pointerdown은 사용자 활성화가 아님) → 모두 듣고, 처음엔 무음 버퍼로 잠금 해제
   ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click', 'keydown'].forEach(ev => window.addEventListener(ev, unlock, { capture: true, passive: true }));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resume(ac); }); // 백그라운드(홈 화면·다른 앱) 갔다 오면 효과음 컨텍스트 재개
+  window.addEventListener('pageshow', () => resume(ac));
   function applyVol() { if (master) master.gain.value = S.mute ? 0 : S.vol * 0.55; }
   const live = () => ac && !S.mute && S.vol > 0 && ac.state === 'running';
   function tone(f, d, { type = 'sine', g = 0.25, f2 = null, at = 0, attack = 0.004 } = {}) {
@@ -3972,7 +3979,7 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   let seq = null;
   function newSeq() {
     finish();
-    seq = { timers: [], anims: [], nodes: [], finals: [], rafs: [], end: 0 };
+    seq = { timers: [], anims: [], nodes: [], finals: [], rafs: [], end: 0, t0: performance.now() };
     seq.watch = setTimeout(finish, 20000);
     document.body.classList.add('fx-busy');
     return seq;
@@ -4008,11 +4015,20 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   // Big sequences (turn resolution, scoring, settle, modal reveals): a click only fast-forwards (swallowed, so it
   // can never double-fire). Small ones (selection, mode toggle, discard, shop, consumables): finish instantly and let
   // the click through — input is never dropped.
+  // 연출 시작 뒤 이 시간(ms)이 지나면 패·판 진행 버튼 탭은 삼키지 않고 '연출 끝내기 + 그대로 처리'. 그 안의 탭(같은 손짓의 겹탭·연타)은 연출만 끝낸다.
+  // 폰에서 1x 기준 턴 연출이 2.5~3초라 "탭했는데 안 눌린다"(연출만 끊기고 탭은 버려짐 → 한 번 더 눌러야 함)는 느낌의 주원인이었다.
+  const PASS_GRACE = 350;
+  const PASS_ALWAYS = '.modal.gostop [data-act=go],.modal.gostop [data-act=stop],.gsview [data-act=gsback]';
+  const PASS_LATE = '.hand .card,.floor .card,.modal.intro [data-act=start],.modal.end [data-act],.modal.shopm [data-act],[data-act=mode],[data-act=discard],[data-act=usecons],.deckback[data-act]';
   window.addEventListener('click', e => {
     if (!seq) return; if (e.target.closest && e.target.closest('#fx-settings,#fx-gear,#fx-first,#jk-ov,#deck-ov,#hist-ov,#ipop-ov,[data-act=speed]')) return;
-    const big = seq.big; finish();
+    const big = seq.big, age = performance.now() - seq.t0; finish();
+    if (!big) return;
+    const t = e.target.closest ? e.target : null;
     // 고/스톱 버튼은 연출 중이어도 삼키지 않는다 (버그 D 방어: 남은 연출/백그라운드 복귀 뒤 첫 탭이 먹히지 않게) — 연출만 끝내고 그대로 처리
-    if (big && !(e.target.closest && e.target.closest('.modal.gostop [data-act=go],.modal.gostop [data-act=stop],.gsview [data-act=gsback]'))) { e.stopImmediatePropagation(); e.preventDefault(); }
+    if (t && t.closest(PASS_ALWAYS)) return;
+    if (t && age >= PASS_GRACE && t.closest(PASS_LATE)) return;
+    e.stopImmediatePropagation(); e.preventDefault();
   }, true);
 
   // keys: Space/Escape = skip only; any other key fast-forwards and is then handled normally (queued, not dropped)
@@ -4805,7 +4821,7 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
     while (nextT < ctx.currentTime + 0.18) { try { scheduleStep(R, abs, nextT, state); } catch (e) { console.warn('[bgm]', e && e.message); } abs++; nextT += STEP; }
   }
   function start() {
-    if (DISABLED || started) { if (ctx && ctx.state === 'suspended' && !document.hidden) ctx.resume(); return; }
+    if (DISABLED || started) { if (ctx && ctx.state !== 'running' && ctx.state !== 'closed' && !document.hidden) { try { const p = ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) {} } return; } // iOS: 전화·시리 뒤 'interrupted'(비표준)도 재개
     const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
     try {
       ctx = new C(); master = ctx.createGain(); master.gain.value = 0; master.connect(ctx.destination);
@@ -4816,7 +4832,7 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   }
   if (!DISABLED && typeof window !== 'undefined') {
     ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click', 'keydown'].forEach(ev => window.addEventListener(ev, start, { capture: true, passive: true })); // iOS: touchend/click이 사용자 활성화
-    document.addEventListener('visibilitychange', () => { if (!ctx) return; if (document.hidden) ctx.suspend(); else ctx.resume().then(() => { nextT = ctx.currentTime + 0.05; }); });
+    document.addEventListener('visibilitychange', () => { if (!ctx) return; if (document.hidden) ctx.suspend(); else ctx.resume().then(() => { nextT = ctx.currentTime + 0.05; }).catch(() => {}); });
   }
   /** Called by ui.js on every render with the run; maps game state → intensity. */
   function sync(run) {
@@ -5479,14 +5495,29 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   // 오른쪽 아래 '탭해서 넘기기 ▸' (1.2초 뒤 나타남). juice 시퀀스 밖의 독립 오버레이라
   // 연출 건너뛰기(탭)·팝업 상한(capLayer)·시퀀스 정리에 지워지지 않고, 화면을 탭하면 바로 닫힌다. 판이 바뀌면 자동으로 닫힌다.
   const HOLD_MIN = 5000, PER_CHAR = 110, GAP = { normal: 650, overkill: 650, boss: 700, legend: 750, gobak: 650, set: 750 }, LAST_MIN = 3000, FADE = 350, QUOTE_AT = 500;
-  let cur = null; // { wrap, timers }
+  let cur = null; // { wrap, timers, block }
   function dismiss(fast) {
     const c = cur; if (!c) return; cur = null; c.timers.forEach(clearTimeout);
     const w = c.wrap; w.classList.add('praise-out');
-    // 손가락을 뗄 때의 click이 밑의 버튼(상점으로 등)에 떨어지지 않도록 잠깐 남겨 둔다
     try { w.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(-24px) scale(1.03)' }], { duration: fast ? 160 : FADE, fill: 'forwards' }); } catch (e) {}
     setTimeout(() => w.remove(), (fast ? 160 : FADE) + 220);
   }
+  // 입력: 오버레이 자체는 pointer-events:none. 문서 레벨에서 첫 탭을 받아 닫는다.
+  //  - 정산 칭송: 탭이 칭송 글자 위가 아니고 정산 버튼(상점으로·내 덱 보기 등) 위면 닫으면서 그 버튼도 그대로 눌린다 → '탭 → (잠깐 기다림) → 다시 탭' 없이 한 번에.
+  //  - 글자 위 탭·빈 곳 탭·판 중 세트피스(4고·오광): 닫기만 하고 탭은 삼킨다 (밑의 패·고/스톱 버튼이 눌리지 않게).
+  //  예전엔 오버레이가 탭을 받고 380ms 더 남아 있어서, 탭-탭(닫기→상점으로)이 빠르면 두 번째 탭도 먹혔다.
+  let swallowUntil = 0;
+  const overText = (c, x, y) => [...c.wrap.querySelectorAll('.praise-line,.praise-quote')].some(el => { const r = el.getBoundingClientRect(); return x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6; });
+  document.addEventListener('pointerdown', e => {
+    const c = cur; if (!c) return;
+    const t = e.target; const btn = !c.block && t && t.closest ? t.closest('button,[data-act],#deck-fab,#fx-gear') : null;
+    const pass = !!btn && !btn.disabled && !overText(c, e.clientX, e.clientY);
+    dismiss(true);
+    if (pass) return;
+    e.preventDefault(); e.stopPropagation(); swallowUntil = performance.now() + 700;
+  }, true);
+  document.addEventListener('pointercancel', () => { swallowUntil = 0; }, true);
+  document.addEventListener('click', e => { if (performance.now() < swallowUntil) { swallowUntil = 0; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
   function durationFor(tier, texts, gap) {
     const chars = texts.reduce((a, x) => a + x.replace(/\s/g, '').length, 0);
     const lastAt = (texts.length - 1) * (gap || GAP[tier]);
@@ -5513,9 +5544,7 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
     const wrap = document.createElement('div'); wrap.className = 'praise praise-live praise-' + tier; wrap.setAttribute('role', 'status');
     const flash = document.createElement('div'); flash.className = 'praise-flash'; wrap.appendChild(flash);
     document.body.appendChild(wrap);
-    const c = cur = { wrap, timers: [] }; const later = (ms, fn) => c.timers.push(setTimeout(() => { if (cur === c) try { fn(); } catch (e) {} }, ms));
-    wrap.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); dismiss(true); });
-    wrap.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
+    const c = cur = { wrap, timers: [], block: !!(L && L.setId) }; const later = (ms, fn) => c.timers.push(setTimeout(() => { if (cur === c) try { fn(); } catch (e) {} }, ms));
     if (!reduce) flash.animate([{ opacity: 0.85 }, { opacity: 0 }], { duration: 380, easing: 'ease-out', fill: 'forwards' }); else flash.style.opacity = 0;
     const gap = L.setId ? GAP.set : GAP[tier];
     const hint = document.createElement('small'); hint.className = 'praise-hint'; hint.textContent = '탭해서 넘기기 ▸'; wrap.appendChild(hint);
@@ -5920,7 +5949,9 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   function touchTip(t) { const h = tipFor(t); if (!h) return false; showTip(t, h); clearTimeout(tipAuto); tipAuto = setTimeout(hideTip, 3200); return true; }
   document.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'touch') return; lastTouch = performance.now(); lpFired = false; clearTimeout(lpTimer);
-    const t = e.target.closest && e.target.closest(TIP_SEL); if (!t || !run) return; lpStart = { x: e.clientX, y: e.clientY };
+    const t = e.target.closest && e.target.closest(TIP_SEL); if (!t || !run) return;
+    if (e.target.closest('button,[data-act]')) return; // 버튼(족보 보기·⚙·덱·넘기기)은 길게 눌러도 툴팁으로 탭을 삼키지 않는다 — 천천히 누르면 '안 눌리는' 느낌이었음
+    lpStart = { x: e.clientX, y: e.clientY };
     lpTimer = setTimeout(() => { if (window.GoJuice && window.GoJuice.busy()) return; if (touchTip(t)) lpFired = true; }, 420);
   }, true);
   document.addEventListener('pointermove', e => { if (e.pointerType === 'touch' && lpStart && Math.hypot(e.clientX - lpStart.x, e.clientY - lpStart.y) > 10) clearTimeout(lpTimer); }, true);
