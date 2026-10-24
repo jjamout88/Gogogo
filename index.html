@@ -2047,6 +2047,7 @@ html.lay-phone .dk-panel.dk2 .dk-sub{display:none}
 html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
 /* v0.5.4: 덱 시트 닫기·토글 버튼 터치 영역 넓힘 (보이는 크기는 그대로) */
 .dk-panel.dk2 .jk-head .dk-x,.dk-panel.dk2 .jk-head .dk-tog{position:relative}.dk-panel.dk2 .jk-head .dk-x::after,.dk-panel.dk2 .jk-head .dk-tog::after{content:"";position:absolute;inset:-8px -6px}
+#resume-note{pointer-events:none}#resume-note .mini-btn{pointer-events:auto}#resume-note .mini-btn.armed{background:#e8141c;color:#fff}
 
 #app.stage{--card-render:pixelated}
 </style></head>
@@ -5951,7 +5952,7 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   document.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'touch') return; lastTouch = performance.now(); lpFired = false; clearTimeout(lpTimer);
     const t = e.target.closest && e.target.closest(TIP_SEL); if (!t || !run) return;
-    if (e.target.closest('button,[data-act]')) return; // 버튼(족보 보기·⚙·덱·넘기기)은 길게 눌러도 툴팁으로 탭을 삼키지 않는다 — 천천히 누르면 '안 눌리는' 느낌이었음
+    if (e.target.closest('button,[data-act],[data-joker],[data-cons]')) return; // 버튼(족보 보기·⚙·덱·넘기기)은 길게 눌러도 툴팁으로 탭을 삼키지 않는다 — 천천히 누르면 '안 눌리는' 느낌이었음
     lpStart = { x: e.clientX, y: e.clientY };
     lpTimer = setTimeout(() => { if (window.GoJuice && window.GoJuice.busy()) return; if (touchTip(t)) lpFired = true; }, 420);
   }, true);
@@ -6694,13 +6695,23 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   function resumeNote() {
     const n = document.createElement('div'); n.id = 'resume-note';
     n.innerHTML = `<b>이어하기</b> ${resumeWhere(run)} · 시드 #${run.seed} <button class="mini-btn" data-new>새 게임</button>`;
-    document.body.appendChild(n); const t = setTimeout(() => n.remove(), 7000);
-    n.querySelector('[data-new]').addEventListener('click', () => { clearTimeout(t); n.remove(); if (window.GoSave) window.GoSave.clear(); newGame(undefined, { resume: false }); });
+    document.body.appendChild(n);
+    // v0.5.4: 안내가 부적 줄 위에 떠서 부적 탭을 가로채고, '새 게임'이 잘못 눌려 판이 날아갔다 →
+    // 안내 자체는 탭이 통과(pointer-events:none, 버튼만 받음), 다른 곳을 탭하면 바로 사라짐, '새 게임'은 한 번 더 눌러 확인.
+    const bye = () => { clearTimeout(t); n.remove(); document.removeEventListener('pointerdown', away, true); };
+    const away = e => { if (!(e.target.closest && e.target.closest('#resume-note [data-new]'))) bye(); };
+    const t = setTimeout(bye, 7000); document.addEventListener('pointerdown', away, true);
+    const nb = n.querySelector('[data-new]'); let armAt = 0;
+    nb.addEventListener('click', e => { e.stopPropagation();
+      if (!armAt) { armAt = performance.now(); nb.textContent = '정말 새로 시작?'; nb.classList.add('armed'); clearTimeout(t); setTimeout(() => { if (n.isConnected) bye(); }, 4000); return; }
+      if (performance.now() - armAt < 400) return; // 같은 손짓의 겹탭은 무시
+      bye(); if (window.GoSave) window.GoSave.clear(); newGame(undefined, { resume: false }); });
   }
   function incompatNote() { // v0.5: 규칙이 바뀌어 v0.4 판은 이어하지 않는다 (기록은 남김)
     const n = document.createElement('div'); n.id = 'resume-note'; n.className = 'incompat';
     n.innerHTML = `<b>새 규칙</b> 규칙이 바뀌어 이전 판은 이어할 수 없어요. 기록은 그대로 남아 있어요.`;
     document.body.appendChild(n); setTimeout(() => n.remove(), 7000);
+    document.addEventListener('pointerdown', () => n.remove(), { capture: true, once: true });
   }
   // keyboard: 1–9 패 (꾸러미: 1–3 고르기) · P 훔쳐보기 · D 고르기/버리기 · O 정렬 · G/S 고/스톱 · Enter 진행 · J/Tab 족보 · V 남은 덱 · Esc 닫기 (M 음소거, B BGM: juice)
   const KO = { 'ㅓ': 'j', 'ㅇ': 'd', 'ㅐ': 'o', 'ㅎ': 'g', 'ㄴ': 's', 'ㅍ': 'v', 'ㅔ': 'p' }; // 한글 자판 상태에서도 동작
