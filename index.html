@@ -2045,6 +2045,8 @@ html.px .dk-panel.dk2 .dk-tab.on{background:#ffc84a !important;box-shadow:inset 
 html.lay-phone .dk-panel.dk2 .jk-head{gap:5px}
 html.lay-phone .dk-panel.dk2 .dk-sub{display:none}
 html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
+/* v0.5.4: 덱 시트 닫기·토글 버튼 터치 영역 넓힘 (보이는 크기는 그대로) */
+.dk-panel.dk2 .jk-head .dk-x,.dk-panel.dk2 .jk-head .dk-tog{position:relative}.dk-panel.dk2 .jk-head .dk-x::after,.dk-panel.dk2 .jk-head .dk-tog::after{content:"";position:absolute;inset:-8px -6px}
 
 #app.stage{--card-render:pixelated}
 </style></head>
@@ -4019,7 +4021,7 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   // 폰에서 1x 기준 턴 연출이 2.5~3초라 "탭했는데 안 눌린다"(연출만 끊기고 탭은 버려짐 → 한 번 더 눌러야 함)는 느낌의 주원인이었다.
   const PASS_GRACE = 350;
   const PASS_ALWAYS = '.modal.gostop [data-act=go],.modal.gostop [data-act=stop],.gsview [data-act=gsback]';
-  const PASS_LATE = '.hand .card,.floor .card,.modal.intro [data-act=start],.modal.end [data-act],.modal.shopm [data-act],[data-act=mode],[data-act=discard],[data-act=usecons],.deckback[data-act]';
+  const PASS_LATE = 'button,[data-act],.hand .card,.floor .card,#deck-fab,.strip [data-joker],.conslist [data-cons]'; // 모든 버튼·패: 연출 0.35초 뒤 탭은 버리지 않는다
   window.addEventListener('click', e => {
     if (!seq) return; if (e.target.closest && e.target.closest('#fx-settings,#fx-gear,#fx-first,#jk-ov,#deck-ov,#hist-ov,#ipop-ov,[data-act=speed]')) return;
     const big = seq.big, age = performance.now() - seq.t0; finish();
@@ -5507,11 +5509,10 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   //  - 글자 위 탭·빈 곳 탭·판 중 세트피스(4고·오광): 닫기만 하고 탭은 삼킨다 (밑의 패·고/스톱 버튼이 눌리지 않게).
   //  예전엔 오버레이가 탭을 받고 380ms 더 남아 있어서, 탭-탭(닫기→상점으로)이 빠르면 두 번째 탭도 먹혔다.
   let swallowUntil = 0;
-  const overText = (c, x, y) => [...c.wrap.querySelectorAll('.praise-line,.praise-quote')].some(el => { const r = el.getBoundingClientRect(); return x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6; });
   document.addEventListener('pointerdown', e => {
     const c = cur; if (!c) return;
     const t = e.target; const btn = !c.block && t && t.closest ? t.closest('button,[data-act],#deck-fab,#fx-gear') : null;
-    const pass = !!btn && !btn.disabled && !overText(c, e.clientX, e.clientY);
+    const pass = !!btn && !btn.disabled; // 버튼 위 탭은 칭송 글자가 겹쳐 있어도 닫으면서 그대로 누른다 (칭송이 '상점으로' 버튼 위에 떠서 두세 번 눌러야 했음)
     dismiss(true);
     if (pass) return;
     e.preventDefault(); e.stopPropagation(); swallowUntil = performance.now() + 700;
@@ -6116,7 +6117,10 @@ html.lay-phone .dk-panel.dk2 .dk-sum{font-size:11px;gap:4px}
   function openPop(html, anchor, tag) {
     closeItemPop(); hideTip();
     const ov = document.createElement('div'); ov.id = 'ipop-ov'; ov.innerHTML = term(html); document.body.appendChild(ov); ui.ipop = tag || { k: 'card' };
-    if (!tag) { ov.classList.add('block'); ov.addEventListener('click', e => { if (!e.target.closest('.ipop')) { e.stopPropagation(); closeItemPop(); } }); } // 덱 시트 위 카드 설명: 밖 탭은 팝업만 닫음 (시트는 유지)
+    if (!tag) { ov.classList.add('block'); ov.addEventListener('click', e => { if (!e.target.closest('.ipop')) { e.stopPropagation(); closeItemPop();
+      // 덱 시트 위 카드 설명: 밖 탭은 팝업만 닫음 (시트는 유지). 단, 탭한 자리가 시트의 버튼(닫기·탭·토글)이면 그 버튼도 바로 누른다 — '닫기'를 두 번 눌러야 했음
+      const u = document.elementFromPoint(e.clientX, e.clientY); const btn = u && u.closest && u.closest('#deck-ov button,#deck-ov [data-dk-tab],#deck-ov [data-dk-tog],#deck-ov [data-dk-close],#deck-fab');
+      if (btn) btn.click(); } }); }
     ov.addEventListener('click', e => { const bt = e.target.closest('[data-pa]'); e.stopPropagation();
       if (bt) { if (bt.disabled) return; const a = bt.dataset.pa, j = +bt.dataset.i; closeItemPop();
         if (a === 'close') return;
